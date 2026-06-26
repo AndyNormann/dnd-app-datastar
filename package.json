@@ -1,0 +1,20 @@
+{
+  "name": "dnd-app-datastar",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun run css && bun --watch src/index.ts",
+    "start": "bun run css && bun src/index.ts",
+    "css": "tailwindcss -i ./src/styles.css -o ./public/app.css --minify"
+  },
+  "dependencies": {
+    "hono": "^4.6.14",
+    "marked": "^14.1.3"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "playwright": "^1.61.1",
+    "tailwindcss": "^3.4.17"
+  }
+}

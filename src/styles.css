@@ -1,0 +1,39 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Fog-of-war grid. The same fog fragment is broadcast to everyone; the
+   surrounding .dm-view / .play-view context decides how hidden cells look. */
+.fog-grid {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  touch-action: none;
+  user-select: none;
+}
+.fog-grid .cell {
+  width: 100%;
+  height: 100%;
+}
+.fog-grid .cell[data-revealed="1"] {
+  background: transparent;
+}
+/* Players: hidden cells are fully opaque black. */
+.play-view .fog-grid .cell[data-revealed="0"] {
+  background: #000;
+}
+/* DM: hidden cells are dimmed so the DM can still see the map underneath,
+   plus a faint grid so cells are clickable targets. */
+.dm-view .fog-grid {
+  outline: 1px solid rgba(255, 255, 255, 0.15);
+}
+.dm-view .fog-grid .cell {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  cursor: pointer;
+}
+.dm-view .fog-grid .cell[data-revealed="0"] {
+  background: rgba(0, 0, 0, 0.62);
+}
+.dm-view .fog-grid .cell:hover {
+  box-shadow: inset 0 0 0 1px rgba(99, 179, 237, 0.9);
+}
