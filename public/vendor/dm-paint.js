@@ -77,18 +77,12 @@ if (stage && selbox) {
     dragging = false;
     selbox.hidden = true;
 
-    let cells;
-    let action;
-    if (endIndex === startIndex) {
-      // No real drag: toggle the single cell based on its current state.
-      const startCell = stage.querySelector(`.cell[data-i="${startIndex}"]`);
-      const wasRevealed = startCell && startCell.dataset.revealed === "1";
-      action = wasRevealed ? "hide" : "reveal";
-      cells = [startIndex];
-    } else {
-      action = "reveal";
-      cells = rangeIndices(startIndex, endIndex);
-    }
+    // The start cell's current state decides the direction: starting on a
+    // hidden square reveals the box/cell, starting on a revealed square hides it.
+    const startCell = stage.querySelector(`.cell[data-i="${startIndex}"]`);
+    const wasRevealed = startCell && startCell.dataset.revealed === "1";
+    const action = wasRevealed ? "hide" : "reveal";
+    const cells = endIndex === startIndex ? [startIndex] : rangeIndices(startIndex, endIndex);
 
     fetch(url, {
       method: "POST",

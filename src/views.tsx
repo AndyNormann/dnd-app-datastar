@@ -253,7 +253,8 @@ export const DmMapPage: FC<{ session: Session; map: MapRow }> = ({ session, map 
         <SharedBadge shared={map.shared} />
       </div>
       <p class="text-slate-400 text-sm mb-3">
-        Drag a box to reveal an area; click a cell to toggle. Players see shared maps live.
+        Drag a box to reveal an area (or hide it, if you start on a revealed square);
+        click a cell to toggle. Players see shared maps live.
       </p>
 
       <div class="mb-3 flex flex-wrap gap-2">
