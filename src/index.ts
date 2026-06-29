@@ -8,11 +8,11 @@ import {
   createSession,
   sessionByDm,
   sessionByPlayer,
-  listNotes,
-  getNote,
-  createNote,
-  updateNote,
-  deleteNote,
+  getDoc,
+  setDocBody,
+  sharedKeySet,
+  setSharedKeys,
+  toggleSharedKey,
   listMaps,
   getMap,
   createMap,
@@ -23,13 +23,14 @@ import {
   type Session,
 } from "./db.ts";
 import { subscribe, broadcast, patchElements } from "./realtime.ts";
+import { parseDoc, allKeys, renderDmOutline, renderPlayerDoc } from "./notesdoc.ts";
 import {
   HomePage,
   DmDashboard,
-  NoteEditorPage,
+  CampaignEditorPage,
   DmMapPage,
   PlayerDashboard,
-  PlayerNotePage,
+  PlayerNotesPage,
   PlayerMapPage,
   FogOverlay,
   NotFound,
@@ -73,7 +74,6 @@ app.get("/dm/:t", (c) => {
     DmDashboard({
       origin: origin(c),
       session: s,
-      notes: listNotes(s.id),
       maps: listMaps(s.id),
     }),
   );
@@ -82,46 +82,43 @@ app.get("/dm/:t", (c) => {
 // DM live event stream
 app.get("/dm/:t/events", (c) => sseStream(c, dmOr404(c)));
 
-// Notes
+// Campaign document
+app.get("/dm/:t/notes", (c) => {
+  const s = dmOr404(c);
+  if (!s) return page(c, NotFound({}));
+  const doc = getDoc(s.id);
+  const outline = renderDmOutline(parseDoc(doc.body_md), sharedKeySet(doc), `/dm/${s.dm_token}`);
+  return page(c, CampaignEditorPage({ session: s, bodyMd: doc.body_md, outlineHtml: outline }));
+});
+
 app.post("/dm/:t/notes", async (c) => {
   const s = dmOr404(c);
   if (!s) return page(c, NotFound({}));
-  const note = createNote(s.id, "Untitled note");
-  return c.redirect(`/dm/${s.dm_token}/notes/${note.id}`);
-});
-
-app.get("/dm/:t/notes/:id", (c) => {
-  const s = dmOr404(c);
-  if (!s) return page(c, NotFound({}));
-  const note = getNote(s.id, Number(c.req.param("id")));
-  if (!note) return page(c, NotFound({}));
-  return page(c, NoteEditorPage({ session: s, note }));
-});
-
-app.post("/dm/:t/notes/:id", async (c) => {
-  const s = dmOr404(c);
-  if (!s) return page(c, NotFound({}));
-  const id = Number(c.req.param("id"));
-  const note = getNote(s.id, id);
-  if (!note) return page(c, NotFound({}));
   const body = await c.req.parseBody();
-  const wasShared = note.shared;
-  updateNote(s.id, id, {
-    title: String(body.title ?? note.title).trim() || "Untitled note",
-    body_md: String(body.body_md ?? ""),
-    shared: body.shared ? 1 : 0,
-  });
-  // If sharing state changed, refresh the player note list live.
-  if ((body.shared ? 1 : 0) !== wasShared) broadcastNotesList(s);
-  return c.redirect(`/dm/${s.dm_token}/notes/${id}`);
+  const md = String(body.body_md ?? "");
+  setDocBody(s.id, md);
+  // Drop shared keys for headings that no longer exist.
+  const parsed = parseDoc(md);
+  const exist = allKeys(parsed.sections);
+  const pruned = new Set([...sharedKeySet(getDoc(s.id))].filter((k) => exist.has(k)));
+  setSharedKeys(s.id, pruned);
+  broadcastPlayerDoc(s);
+  return c.redirect(`/dm/${s.dm_token}/notes`);
 });
 
-app.post("/dm/:t/notes/:id/delete", (c) => {
+app.post("/dm/:t/notes/share", (c) => {
   const s = dmOr404(c);
-  if (!s) return page(c, NotFound({}));
-  deleteNote(s.id, Number(c.req.param("id")));
-  broadcastNotesList(s);
-  return c.redirect(`/dm/${s.dm_token}`);
+  if (!s) return c.text("not found", 404);
+  const key = c.req.query("key");
+  if (!key) return c.text("missing key", 400);
+  toggleSharedKey(s.id, key);
+  // Update players live, and return the refreshed DM outline to the DM client.
+  broadcastPlayerDoc(s);
+  const doc = getDoc(s.id);
+  const outline = renderDmOutline(parseDoc(doc.body_md), sharedKeySet(doc), `/dm/${s.dm_token}`);
+  return new Response(patchElements(outline), {
+    headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" },
+  });
 });
 
 // Maps
@@ -216,24 +213,15 @@ function playerOr404(c: { req: { param: (k: string) => string } }): Session | nu
 app.get("/play/:t", (c) => {
   const s = playerOr404(c);
   if (!s) return page(c, NotFound({}));
-  return page(
-    c,
-    PlayerDashboard({
-      session: s,
-      notes: listNotes(s.id, true),
-      maps: listMaps(s.id, true),
-    }),
-  );
+  return page(c, PlayerDashboard({ session: s, maps: listMaps(s.id, true) }));
 });
 
 app.get("/play/:t/events", (c) => sseStream(c, playerOr404(c)));
 
-app.get("/play/:t/notes/:id", (c) => {
+app.get("/play/:t/notes", (c) => {
   const s = playerOr404(c);
   if (!s) return page(c, NotFound({}));
-  const note = getNote(s.id, Number(c.req.param("id")));
-  if (!note || !note.shared) return page(c, NotFound({}));
-  return page(c, PlayerNotePage({ session: s, note }));
+  return page(c, PlayerNotesPage({ session: s, docHtml: playerDocHtml(s) }));
 });
 
 app.get("/play/:t/maps/:id", (c) => {
@@ -286,30 +274,20 @@ function broadcastFog(s: Session, mapId: number) {
   broadcast(s.id, patchElements(FogOverlay({ map }).toString()));
 }
 
-function broadcastNotesList(s: Session) {
-  // Player dashboards listen; re-render their shared notes list fragment.
-  const notes = listNotes(s.id, true);
-  const html = renderPlayerNotesList(s, notes);
-  broadcast(s.id, patchElements(html));
+function playerDocHtml(s: Session) {
+  const doc = getDoc(s.id);
+  return renderPlayerDoc(parseDoc(doc.body_md), sharedKeySet(doc));
+}
+
+function broadcastPlayerDoc(s: Session) {
+  // Players viewing the campaign notes get the refreshed #player-doc fragment.
+  broadcast(s.id, patchElements(playerDocHtml(s)));
 }
 
 function broadcastMapsList(s: Session) {
   const maps = listMaps(s.id, true);
   const html = renderPlayerMapsList(s, maps);
   broadcast(s.id, patchElements(html));
-}
-
-function renderPlayerNotesList(s: Session, notes: ReturnType<typeof listNotes>) {
-  const base = `/play/${s.player_token}`;
-  const items = notes.length
-    ? notes
-        .map(
-          (n) =>
-            `<li class="p-3"><a href="${base}/notes/${n.id}" class="text-sky-300 hover:underline">${esc(n.title)}</a></li>`,
-        )
-        .join("")
-    : `<li class="p-3 text-slate-500 text-sm">Nothing shared yet.</li>`;
-  return `<ul id="player-notes" class="divide-y divide-slate-800 rounded border border-slate-800">${items}</ul>`;
 }
 
 function renderPlayerMapsList(s: Session, maps: ReturnType<typeof listMaps>) {

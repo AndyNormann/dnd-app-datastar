@@ -1,7 +1,6 @@
 import type { FC } from "hono/jsx";
-import type { Session, Note, MapRow } from "./db.ts";
+import type { Session, MapRow } from "./db.ts";
 import { revealedSet } from "./db.ts";
-import { renderMarkdown } from "./markdown.ts";
 
 const DATASTAR = "/vendor/datastar.js";
 
@@ -77,9 +76,8 @@ const SharedBadge: FC<{ shared: number }> = ({ shared }) =>
 export const DmDashboard: FC<{
   origin: string;
   session: Session;
-  notes: Note[];
   maps: MapRow[];
-}> = ({ origin, session, notes, maps }) => {
+}> = ({ origin, session, maps }) => {
   const base = `/dm/${session.dm_token}`;
   return (
     <Layout title={`DM · ${session.name}`} view="dm" sseUrl={`${base}/events`}>
@@ -88,25 +86,17 @@ export const DmDashboard: FC<{
       <ShareLinks origin={origin} session={session} />
 
       <section class="mb-8">
-        <div class="flex items-center justify-between mb-2">
-          <h2 class="text-xl font-semibold">Notes</h2>
-          <form method="post" action={`${base}/notes`}>
-            <button class="rounded bg-sky-600 px-3 py-1.5 text-sm hover:bg-sky-500">
-              + New note
-            </button>
-          </form>
-        </div>
-        <ul class="divide-y divide-slate-800 rounded border border-slate-800">
-          {notes.length === 0 && <li class="p-3 text-slate-500 text-sm">No notes yet.</li>}
-          {notes.map((n) => (
-            <li class="flex items-center justify-between p-3">
-              <a href={`${base}/notes/${n.id}`} class="text-sky-300 hover:underline">
-                {n.title}
-              </a>
-              <SharedBadge shared={n.shared} />
-            </li>
-          ))}
-        </ul>
+        <h2 class="text-xl font-semibold mb-2">Campaign Notes</h2>
+        <a
+          href={`${base}/notes`}
+          class="block rounded border border-slate-800 p-3 text-sky-300 hover:bg-slate-800/50 hover:underline"
+        >
+          Open the campaign document →
+        </a>
+        <p class="mt-1 text-xs text-slate-500">
+          One document with collapsible headings. Share a heading to reveal it (and
+          everything nested under it) to players.
+        </p>
       </section>
 
       <section>
@@ -167,48 +157,44 @@ export const DmDashboard: FC<{
   );
 };
 
-export const NoteEditorPage: FC<{ session: Session; note: Note }> = ({ session, note }) => {
+export const CampaignEditorPage: FC<{
+  session: Session;
+  bodyMd: string;
+  outlineHtml: string;
+}> = ({ session, bodyMd, outlineHtml }) => {
   const base = `/dm/${session.dm_token}`;
   return (
-    <Layout title={`Edit · ${note.title}`} view="dm">
+    <Layout title="Campaign Notes" view="dm" sseUrl={`${base}/events`}>
       <a href={base} class="text-sm text-sky-300 hover:underline">
         ← Back
       </a>
-      <form method="post" action={`${base}/notes/${note.id}`} class="mt-3 grid gap-3">
-        <input
-          name="title"
-          value={note.title}
-          required
-          class="rounded bg-slate-800 px-3 py-2 text-lg font-semibold outline-none focus:ring-2 ring-sky-500"
-        />
-        <textarea
-          name="body_md"
-          rows={18}
-          placeholder="Write markdown…"
-          class="rounded bg-slate-800 px-3 py-2 font-mono text-sm outline-none focus:ring-2 ring-sky-500"
-        >
-          {note.body_md}
-        </textarea>
-        <label class="flex items-center gap-2 text-sm">
-          <input type="checkbox" name="shared" value="1" checked={!!note.shared} />
-          Share with players
-        </label>
-        <div class="flex gap-2">
-          <button class="rounded bg-sky-600 px-4 py-2 hover:bg-sky-500">Save</button>
-          <button
-            formaction={`${base}/notes/${note.id}/delete`}
-            class="rounded bg-rose-700 px-4 py-2 hover:bg-rose-600"
+      <h1 class="mt-2 text-2xl font-bold mb-1">Campaign Notes</h1>
+      <p class="text-slate-400 text-sm mb-4">
+        Use markdown <code>#</code>…<code>######</code> headings to structure the
+        campaign. Share a heading to reveal it and everything nested under it to players.
+      </p>
+
+      <div class="grid gap-6 lg:grid-cols-2">
+        <form method="post" action={`${base}/notes`} class="grid gap-2">
+          <textarea
+            name="body_md"
+            rows={24}
+            placeholder="# Region&#10;Overview the players can see…&#10;&#10;## Secret room&#10;DM-only until shared."
+            class="w-full rounded bg-slate-800 px-3 py-2 font-mono text-sm outline-none focus:ring-2 ring-sky-500"
           >
-            Delete
+            {bodyMd}
+          </textarea>
+          <button class="justify-self-start rounded bg-sky-600 px-4 py-2 hover:bg-sky-500">
+            Save
           </button>
+        </form>
+
+        <div>
+          <div class="text-xs uppercase tracking-wide text-slate-500 mb-1">
+            Outline &amp; sharing
+          </div>
+          <div dangerouslySetInnerHTML={{ __html: outlineHtml }} />
         </div>
-      </form>
-      <div class="mt-6">
-        <div class="text-xs uppercase tracking-wide text-slate-500 mb-1">Preview</div>
-        <div
-          class="prose prose-invert max-w-none rounded border border-slate-800 p-4"
-          dangerouslySetInnerHTML={{ __html: renderMarkdown(note.body_md) }}
-        />
       </div>
     </Layout>
   );
@@ -295,9 +281,8 @@ export const DmMapPage: FC<{ session: Session; map: MapRow }> = ({ session, map 
   );
 };
 
-export const PlayerDashboard: FC<{ session: Session; notes: Note[]; maps: MapRow[] }> = ({
+export const PlayerDashboard: FC<{ session: Session; maps: MapRow[] }> = ({
   session,
-  notes,
   maps,
 }) => {
   const base = `/play/${session.player_token}`;
@@ -307,6 +292,16 @@ export const PlayerDashboard: FC<{ session: Session; notes: Note[]; maps: MapRow
       <p class="text-slate-400 mb-4 text-sm">Player view</p>
 
       <section class="mb-8">
+        <h2 class="text-xl font-semibold mb-2">Campaign Notes</h2>
+        <a
+          href={`${base}/notes`}
+          class="block rounded border border-slate-800 p-3 text-sky-300 hover:bg-slate-800/50 hover:underline"
+        >
+          Read the shared campaign notes →
+        </a>
+      </section>
+
+      <section>
         <h2 class="text-xl font-semibold mb-2">Maps</h2>
         <ul id="player-maps" class="divide-y divide-slate-800 rounded border border-slate-800">
           {maps.length === 0 && (
@@ -321,36 +316,20 @@ export const PlayerDashboard: FC<{ session: Session; notes: Note[]; maps: MapRow
           ))}
         </ul>
       </section>
-
-      <section>
-        <h2 class="text-xl font-semibold mb-2">Notes</h2>
-        <ul id="player-notes" class="divide-y divide-slate-800 rounded border border-slate-800">
-          {notes.length === 0 && (
-            <li class="p-3 text-slate-500 text-sm">Nothing shared yet.</li>
-          )}
-          {notes.map((n) => (
-            <li class="p-3">
-              <a href={`${base}/notes/${n.id}`} class="text-sky-300 hover:underline">
-                {n.title}
-              </a>
-            </li>
-          ))}
-        </ul>
-      </section>
     </Layout>
   );
 };
 
-export const PlayerNotePage: FC<{ session: Session; note: Note }> = ({ session, note }) => (
-  <Layout title={note.title} view="play">
+export const PlayerNotesPage: FC<{ session: Session; docHtml: string }> = ({
+  session,
+  docHtml,
+}) => (
+  <Layout title="Campaign Notes" view="play" sseUrl={`/play/${session.player_token}/events`}>
     <a href={`/play/${session.player_token}`} class="text-sm text-sky-300 hover:underline">
       ← Back
     </a>
-    <h1 class="mt-2 text-2xl font-bold mb-3">{note.title}</h1>
-    <div
-      class="prose prose-invert max-w-none"
-      dangerouslySetInnerHTML={{ __html: renderMarkdown(note.body_md) }}
-    />
+    <h1 class="mt-2 text-2xl font-bold mb-3">Campaign Notes</h1>
+    <div dangerouslySetInnerHTML={{ __html: docHtml }} />
   </Layout>
 );
 

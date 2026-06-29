@@ -16,13 +16,13 @@ db.exec(`
     created_at  INTEGER NOT NULL
   );
 
-  CREATE TABLE IF NOT EXISTS notes (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id  INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    title       TEXT NOT NULL,
+  -- The legacy per-note model was replaced by a single campaign document.
+  DROP TABLE IF EXISTS notes;
+
+  CREATE TABLE IF NOT EXISTS campaign_docs (
+    session_id  INTEGER PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
     body_md     TEXT NOT NULL DEFAULT '',
-    shared      INTEGER NOT NULL DEFAULT 0,
-    position    INTEGER NOT NULL DEFAULT 0,
+    shared_keys TEXT NOT NULL DEFAULT '',
     updated_at  INTEGER NOT NULL
   );
 
@@ -48,13 +48,10 @@ export type Session = {
   created_at: number;
 };
 
-export type Note = {
-  id: number;
+export type CampaignDoc = {
   session_id: number;
-  title: string;
   body_md: string;
-  shared: number;
-  position: number;
+  shared_keys: string; // newline-separated shared heading keys
   updated_at: number;
 };
 
@@ -98,52 +95,50 @@ export function sessionByPlayer(t: string): Session | null {
     .get(t);
 }
 
-// --- Notes ---
-export function listNotes(sessionId: number, onlyShared = false): Note[] {
-  const where = onlyShared ? "AND shared = 1" : "";
+// --- Campaign document ---
+export function getDoc(sessionId: number): CampaignDoc {
+  const existing = db
+    .query<CampaignDoc, [number]>(`SELECT * FROM campaign_docs WHERE session_id = ?`)
+    .get(sessionId);
+  if (existing) return existing;
   return db
-    .query<Note, [number]>(
-      `SELECT * FROM notes WHERE session_id = ? ${where} ORDER BY position, id`,
+    .query<CampaignDoc, [number, number]>(
+      `INSERT INTO campaign_docs (session_id, updated_at) VALUES (?, ?) RETURNING *`,
     )
-    .all(sessionId);
+    .get(sessionId, now())!;
 }
 
-export function getNote(sessionId: number, id: number): Note | null {
-  return db
-    .query<Note, [number, number]>(`SELECT * FROM notes WHERE session_id = ? AND id = ?`)
-    .get(sessionId, id);
-}
-
-export function createNote(sessionId: number, title: string): Note {
-  return db
-    .query<Note, [number, string, number]>(
-      `INSERT INTO notes (session_id, title, updated_at) VALUES (?, ?, ?) RETURNING *`,
-    )
-    .get(sessionId, title, now())!;
-}
-
-export function updateNote(
-  sessionId: number,
-  id: number,
-  fields: { title?: string; body_md?: string; shared?: number },
-): void {
-  const cur = getNote(sessionId, id);
-  if (!cur) return;
-  db.query(
-    `UPDATE notes SET title = ?, body_md = ?, shared = ?, updated_at = ?
-     WHERE session_id = ? AND id = ?`,
-  ).run(
-    fields.title ?? cur.title,
-    fields.body_md ?? cur.body_md,
-    fields.shared ?? cur.shared,
+export function setDocBody(sessionId: number, body: string): void {
+  getDoc(sessionId); // ensure the row exists
+  db.query(`UPDATE campaign_docs SET body_md = ?, updated_at = ? WHERE session_id = ?`).run(
+    body,
     now(),
     sessionId,
-    id,
   );
 }
 
-export function deleteNote(sessionId: number, id: number): void {
-  db.query(`DELETE FROM notes WHERE session_id = ? AND id = ?`).run(sessionId, id);
+export function sharedKeySet(doc: CampaignDoc): Set<string> {
+  const s = new Set<string>();
+  for (const line of doc.shared_keys.split("\n")) {
+    const k = line.trim();
+    if (k) s.add(k);
+  }
+  return s;
+}
+
+export function setSharedKeys(sessionId: number, keys: Set<string>): void {
+  getDoc(sessionId);
+  db.query(`UPDATE campaign_docs SET shared_keys = ?, updated_at = ? WHERE session_id = ?`).run(
+    [...keys].join("\n"),
+    now(),
+    sessionId,
+  );
+}
+
+export function toggleSharedKey(sessionId: number, key: string): void {
+  const keys = sharedKeySet(getDoc(sessionId));
+  keys.has(key) ? keys.delete(key) : keys.add(key);
+  setSharedKeys(sessionId, keys);
 }
 
 // --- Maps ---
