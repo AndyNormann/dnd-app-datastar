@@ -117,7 +117,7 @@ function renderFull(s: Section): string {
 // ---------- Sanitize editor HTML before persisting ----------
 const ALLOWED_TAGS = new Set([
   "H1", "H2", "H3", "H4", "H5", "H6",
-  "P", "BR", "UL", "OL", "LI", "STRONG", "EM", "B", "I", "U",
+  "P", "DIV", "BR", "UL", "OL", "LI", "STRONG", "EM", "B", "I", "U",
   "A", "CODE", "PRE", "BLOCKQUOTE",
 ]);
 

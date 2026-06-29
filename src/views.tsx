@@ -74,9 +74,6 @@ const SharedBadge: FC<{ shared: number }> = ({ shared }) =>
   );
 
 const NOTE_TOOLBAR = [
-  { cmd: "h1", label: "H1" },
-  { cmd: "h2", label: "H2" },
-  { cmd: "h3", label: "H3" },
   { cmd: "bold", label: "B" },
   { cmd: "ul", label: "• List" },
   { cmd: "p", label: "Text" },
@@ -99,8 +96,9 @@ export const DmDashboard: FC<{
       <section class="mb-8">
         <h2 class="text-xl font-semibold mb-2">Campaign Notes</h2>
         <p class="mb-2 text-xs text-slate-500">
-          Write directly below. Click a heading's <code>#</code> to collapse it; tick a
-          heading's checkbox to share it (and everything under it) with players.
+          Write directly below. Type <code>#</code> + space to make a heading
+          (<code>##</code> for H2, etc.). Click a heading's <code>#</code> to collapse it;
+          tick its checkbox to share it (and everything under it) with players.
         </p>
         <div class="note-toolbar">
           {NOTE_TOOLBAR.map((b) => (

@@ -154,6 +154,8 @@ function setupDoc(container, editable, saveUrl, shareUrl) {
       clearTimeout(timer);
       timer = setTimeout(() => save().then(decorate), 700);
     });
+    container.addEventListener("beforeinput", (e) => onBeforeInput(e, container, decorate));
+    container.addEventListener("keydown", (e) => onEnter(e, container));
     wireToolbar(container);
   } else {
     // Player view is replaced wholesale on each SSE update — redecorate then.
@@ -162,6 +164,72 @@ function setupDoc(container, editable, saveUrl, shareUrl) {
   }
 
   decorate();
+}
+
+// The top-level block element of #doc that contains the given node.
+function blockOf(container, node) {
+  let el = node && node.nodeType === 3 ? node.parentNode : node;
+  while (el && el !== container && el.parentNode !== container) el = el.parentNode;
+  return el && el !== container ? el : null;
+}
+
+// Markdown-style heading shortcut: typing "#"…"######" + space at the start of a
+// block converts it to the matching heading.
+function onBeforeInput(e, container, decorate) {
+  if (e.inputType !== "insertText" || e.data !== " ") return;
+  const sel = document.getSelection();
+  if (!sel || !sel.rangeCount || !sel.isCollapsed) return;
+  const block = blockOf(container, sel.focusNode);
+  if (!block || /^H[1-6]$/.test(block.tagName)) return;
+
+  // Text from the block's start up to the caret.
+  const r = document.createRange();
+  r.selectNodeContents(block);
+  r.setEnd(sel.focusNode, sel.focusOffset);
+  const before = r.toString();
+  const m = before.match(/^(#{1,6})$/);
+  if (!m) return;
+
+  e.preventDefault();
+  const level = m[1].length;
+
+  // Strip the leading hashes from the block's first text node.
+  const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+  const first = walker.nextNode();
+  if (first) first.data = first.data.replace(/^#{1,6}/, "");
+
+  const h = document.createElement("h" + level);
+  while (block.firstChild) h.appendChild(block.firstChild);
+  block.replaceWith(h);
+
+  const caret = document.createRange();
+  caret.setStart(h, 0);
+  caret.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(caret);
+
+  decorate();
+  container.dispatchEvent(new Event("input", { bubbles: true })); // trigger autosave
+}
+
+// Pressing Enter in a heading starts a fresh paragraph below it (Notion-style),
+// so the next line is normal text — and a new "#" shortcut works there.
+function onEnter(e, container) {
+  if (e.key !== "Enter" || e.shiftKey) return;
+  const sel = document.getSelection();
+  if (!sel || !sel.rangeCount) return;
+  const block = blockOf(container, sel.focusNode);
+  if (!block || !/^H[1-6]$/.test(block.tagName)) return;
+  e.preventDefault();
+  const p = document.createElement("p");
+  p.appendChild(document.createElement("br"));
+  block.after(p);
+  const r = document.createRange();
+  r.setStart(p, 0);
+  r.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(r);
+  container.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
 // Minimal formatting toolbar using execCommand (sufficient in Chromium).
