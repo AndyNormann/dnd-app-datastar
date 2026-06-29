@@ -253,7 +253,7 @@ export const DmMapPage: FC<{ session: Session; map: MapRow }> = ({ session, map 
         <SharedBadge shared={map.shared} />
       </div>
       <p class="text-slate-400 text-sm mb-3">
-        Click a cell to toggle. Click and drag to paint reveals. Players see shared maps live.
+        Drag a box to reveal an area; click a cell to toggle. Players see shared maps live.
       </p>
 
       <div class="mb-3 flex flex-wrap gap-2">
@@ -280,8 +280,15 @@ export const DmMapPage: FC<{ session: Session; map: MapRow }> = ({ session, map 
         </form>
       </div>
 
-      <div id="stage" data-reveal-url={`${base}/maps/${map.id}/reveal`}>
+      <div
+        id="stage"
+        class="relative inline-block max-w-full"
+        data-reveal-url={`${base}/maps/${map.id}/reveal`}
+        data-cols={map.cols}
+        data-rows={map.rows}
+      >
         <MapStage map={map} />
+        <div id="selbox" class="selbox" hidden />
       </div>
       <script type="module" src="/vendor/dm-paint.js" />
     </Layout>

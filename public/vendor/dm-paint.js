@@ -1,50 +1,106 @@
-// DM-side fog painting. Click a cell to toggle; click-drag to paint many.
-// Sends the batch to the reveal endpoint; the authoritative fog state then
-// streams back to every viewer (including this page) over Datastar SSE.
+// DM-side fog reveal. Drag a rectangle to reveal every cell it covers; a plain
+// single click toggles one cell. The covered cells are POSTed to the reveal
+// endpoint; the authoritative fog state then streams back to every viewer
+// (including this page) over Datastar SSE.
 const stage = document.getElementById("stage");
-if (stage) {
+const selbox = document.getElementById("selbox");
+if (stage && selbox) {
   const url = stage.dataset.revealUrl;
-  let painting = false;
-  let action = "reveal";
-  let batch = new Set();
+  const cols = Number(stage.dataset.cols);
+
+  let dragging = false;
+  let startIndex = -1;
+  let startX = 0;
+  let startY = 0;
+  let baseline = new Set(); // cells already revealed when the drag began
 
   const cellAt = (x, y) => {
     const el = document.elementFromPoint(x, y);
     return el && el.classList.contains("cell") ? el : null;
   };
 
-  const apply = (cell) => {
-    if (!cell) return;
-    const i = Number(cell.dataset.i);
-    if (batch.has(i)) return;
-    batch.add(i);
-    cell.dataset.revealed = action === "reveal" ? "1" : "0"; // optimistic
+  // Inclusive rectangular range of cell indices spanning two cells in the grid.
+  const rangeIndices = (a, b) => {
+    const ac = a % cols;
+    const ar = (a / cols) | 0;
+    const bc = b % cols;
+    const br = (b / cols) | 0;
+    const minC = Math.min(ac, bc);
+    const maxC = Math.max(ac, bc);
+    const minR = Math.min(ar, br);
+    const maxR = Math.max(ar, br);
+    const out = [];
+    for (let r = minR; r <= maxR; r++) {
+      for (let c = minC; c <= maxC; c++) out.push(r * cols + c);
+    }
+    return out;
+  };
+
+  const drawBox = (clientX, clientY) => {
+    const rect = stage.getBoundingClientRect();
+    const x1 = startX - rect.left;
+    const y1 = startY - rect.top;
+    const x2 = clientX - rect.left;
+    const y2 = clientY - rect.top;
+    selbox.style.left = Math.min(x1, x2) + "px";
+    selbox.style.top = Math.min(y1, y2) + "px";
+    selbox.style.width = Math.abs(x2 - x1) + "px";
+    selbox.style.height = Math.abs(y2 - y1) + "px";
+    selbox.hidden = false;
   };
 
   stage.addEventListener("pointerdown", (e) => {
     const cell = e.target.closest && e.target.closest(".cell");
     if (!cell) return;
     e.preventDefault();
-    painting = true;
-    action = cell.dataset.revealed === "1" ? "hide" : "reveal";
-    batch = new Set();
-    apply(cell);
+    dragging = true;
+    startIndex = Number(cell.dataset.i);
+    startX = e.clientX;
+    startY = e.clientY;
+    baseline = new Set();
+    for (const el of stage.querySelectorAll('.cell[data-revealed="1"]')) {
+      baseline.add(Number(el.dataset.i));
+    }
     try {
       stage.setPointerCapture(e.pointerId);
     } catch {}
   });
 
   stage.addEventListener("pointermove", (e) => {
-    if (!painting) return;
-    apply(cellAt(e.clientX, e.clientY));
+    if (!dragging) return;
+    drawBox(e.clientX, e.clientY);
+    const cell = cellAt(e.clientX, e.clientY);
+    const endIndex = cell ? Number(cell.dataset.i) : startIndex;
+    // Optimistic preview: cells inside the box light up; cells outside fall
+    // back to whatever they were before the drag started.
+    const covered = new Set(rangeIndices(startIndex, endIndex));
+    for (const el of stage.querySelectorAll(".cell")) {
+      const i = Number(el.dataset.i);
+      el.dataset.revealed = covered.has(i) || baseline.has(i) ? "1" : "0";
+    }
   });
 
-  const finish = () => {
-    if (!painting) return;
-    painting = false;
-    if (batch.size === 0) return;
-    const cells = [...batch];
-    batch = new Set();
+  const finish = (e) => {
+    if (!dragging) return;
+    dragging = false;
+    selbox.hidden = true;
+    const cell = e ? cellAt(e.clientX, e.clientY) : null;
+    const endIndex = cell ? Number(cell.dataset.i) : startIndex;
+
+    let cells;
+    let action;
+    if (endIndex === startIndex) {
+      // No real drag: treat as a single-cell toggle.
+      const startCell = stage.querySelector(`.cell[data-i="${startIndex}"]`);
+      const wasRevealed = startCell && startCell.dataset.revealed === "1";
+      action = wasRevealed ? "hide" : "reveal";
+      cells = [startIndex];
+      if (startCell) startCell.dataset.revealed = wasRevealed ? "0" : "1";
+    } else {
+      action = "reveal";
+      cells = rangeIndices(startIndex, endIndex);
+    }
+
     fetch(url, {
       method: "POST",
       headers: { "content-type": "application/json" },
