@@ -38,14 +38,9 @@
   box-shadow: inset 0 0 0 1px rgba(99, 179, 237, 0.9);
 }
 
-/* Rubber-band selection rectangle drawn while the DM drags to reveal a box. */
-.selbox {
-  position: absolute;
-  pointer-events: none;
-  background: rgba(99, 179, 237, 0.25);
-  border: 1px solid rgba(99, 179, 237, 0.9);
-  z-index: 10;
-}
-.selbox[hidden] {
-  display: none;
+/* Cells the DM's current drag selection will affect, highlighted live. Visible
+   over both dark (hidden) and transparent (revealed) DM cells. */
+.dm-view .fog-grid .cell.preview {
+  background: rgba(99, 179, 237, 0.45);
+  box-shadow: inset 0 0 0 1px rgba(99, 179, 237, 1);
 }

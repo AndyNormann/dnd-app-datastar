@@ -289,7 +289,6 @@ export const DmMapPage: FC<{ session: Session; map: MapRow }> = ({ session, map 
         data-rows={map.rows}
       >
         <MapStage map={map} />
-        <div id="selbox" class="selbox" hidden />
       </div>
       <script type="module" src="/vendor/dm-paint.js" />
     </Layout>

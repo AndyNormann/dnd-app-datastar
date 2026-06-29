@@ -1,19 +1,17 @@
-// DM-side fog reveal. Drag a rectangle to reveal every cell it encloses; a plain
-// single click toggles one cell. While dragging, only the selection outline is
-// shown — cells reveal on release. The covered cells are POSTed to the reveal
-// endpoint; the authoritative fog state then streams back to every viewer
-// (including this page) over Datastar SSE.
+// DM-side fog reveal. Drag across the grid to select a rectangle of cells; the
+// affected squares are highlighted while dragging and committed on release. A
+// plain single click toggles one cell. Direction follows the start cell:
+// starting on a hidden square reveals, starting on a revealed square hides. The
+// covered cells are POSTed to the reveal endpoint; the authoritative fog state
+// then streams back to every viewer (including this page) over Datastar SSE.
 const stage = document.getElementById("stage");
-const selbox = document.getElementById("selbox");
-if (stage && selbox) {
+if (stage) {
   const url = stage.dataset.revealUrl;
   const cols = Number(stage.dataset.cols);
   const rows = Number(stage.dataset.rows);
 
   let dragging = false;
   let startIndex = -1;
-  let startX = 0;
-  let startY = 0;
   let endIndex = -1;
 
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -39,17 +37,16 @@ if (stage && selbox) {
     return out;
   };
 
-  const drawBox = (clientX, clientY) => {
-    const rect = stage.getBoundingClientRect();
-    const x1 = clamp(startX - rect.left, 0, rect.width);
-    const y1 = clamp(startY - rect.top, 0, rect.height);
-    const x2 = clamp(clientX - rect.left, 0, rect.width);
-    const y2 = clamp(clientY - rect.top, 0, rect.height);
-    selbox.style.left = Math.min(x1, x2) + "px";
-    selbox.style.top = Math.min(y1, y2) + "px";
-    selbox.style.width = Math.abs(x2 - x1) + "px";
-    selbox.style.height = Math.abs(y2 - y1) + "px";
-    selbox.hidden = false;
+  const clearPreview = () => {
+    for (const el of stage.querySelectorAll(".cell.preview")) el.classList.remove("preview");
+  };
+
+  // Highlight exactly the cells the current selection would affect.
+  const showPreview = () => {
+    const covered = new Set(rangeIndices(startIndex, endIndex));
+    for (const el of stage.querySelectorAll(".cell")) {
+      el.classList.toggle("preview", covered.has(Number(el.dataset.i)));
+    }
   };
 
   stage.addEventListener("pointerdown", (e) => {
@@ -57,10 +54,9 @@ if (stage && selbox) {
     if (!cell) return;
     e.preventDefault();
     dragging = true;
-    startX = e.clientX;
-    startY = e.clientY;
     startIndex = indexAt(e.clientX, e.clientY);
     endIndex = startIndex;
+    showPreview();
     try {
       stage.setPointerCapture(e.pointerId);
     } catch {}
@@ -69,13 +65,13 @@ if (stage && selbox) {
   stage.addEventListener("pointermove", (e) => {
     if (!dragging) return;
     endIndex = indexAt(e.clientX, e.clientY);
-    drawBox(e.clientX, e.clientY);
+    showPreview();
   });
 
   const finish = () => {
     if (!dragging) return;
     dragging = false;
-    selbox.hidden = true;
+    clearPreview();
 
     // The start cell's current state decides the direction: starting on a
     // hidden square reveals the box/cell, starting on a revealed square hides it.
