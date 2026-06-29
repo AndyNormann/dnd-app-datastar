@@ -173,7 +173,14 @@ export const FogOverlay: FC<{ map: MapRow }> = ({ map }) => {
   const total = map.cols * map.rows;
   const cells = [];
   for (let i = 0; i < total; i++) {
-    cells.push(<div class="cell" data-i={i} data-revealed={revealed.has(i) ? "1" : "0"} />);
+    cells.push(
+      <div
+        id={`cell-${map.id}-${i}`}
+        class="cell"
+        data-i={i}
+        data-revealed={revealed.has(i) ? "1" : "0"}
+      />,
+    );
   }
   return (
     <div

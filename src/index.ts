@@ -30,7 +30,6 @@ import {
   DmMapPage,
   PlayerDashboard,
   PlayerMapPage,
-  FogOverlay,
   NotFound,
 } from "./views.tsx";
 
@@ -145,15 +144,18 @@ app.post("/dm/:t/maps/:id/reveal", async (c) => {
   const { cells, action } = await c.req.json<{ cells: number[]; action: string }>();
   const set = revealedSet(map);
   const total = map.cols * map.rows;
+  const changed: number[] = [];
   for (const raw of cells ?? []) {
     const i = Number(raw);
     if (!Number.isInteger(i) || i < 0 || i >= total) continue;
+    const was = set.has(i);
     if (action === "hide") set.delete(i);
     else if (action === "reveal") set.add(i);
     else set.has(i) ? set.delete(i) : set.add(i);
+    if (set.has(i) !== was) changed.push(i);
   }
   setMapRevealed(s.id, id, set);
-  broadcastFog(s, id);
+  broadcastCells(s, id, set, changed);
   return c.body(null, 204);
 });
 
@@ -166,10 +168,15 @@ function bulkReveal(c: any, reveal: boolean) {
   const id = Number(c.req.param("id"));
   const map = getMap(s.id, id);
   if (!map) return page(c, NotFound({}));
+  const before = revealedSet(map);
   const set = new Set<number>();
   if (reveal) for (let i = 0; i < map.cols * map.rows; i++) set.add(i);
+  const changed: number[] = [];
+  for (let i = 0; i < map.cols * map.rows; i++) {
+    if (set.has(i) !== before.has(i)) changed.push(i);
+  }
   setMapRevealed(s.id, id, set);
-  broadcastFog(s, id);
+  broadcastCells(s, id, set, changed);
   return c.redirect(`/dm/${s.dm_token}/maps/${id}`);
 }
 
@@ -251,10 +258,16 @@ function sseStream(c: any, s: Session | null) {
   });
 }
 
-function broadcastFog(s: Session, mapId: number) {
-  const map = getMap(s.id, mapId);
-  if (!map) return;
-  broadcast(s.id, patchElements(FogOverlay({ map }).toString()));
+function cellHtml(mapId: number, i: number, revealed: boolean) {
+  return `<div id="cell-${mapId}-${i}" class="cell" data-i="${i}" data-revealed="${revealed ? "1" : "0"}"></div>`;
+}
+
+// Push only the cells that changed; Datastar morphs each by id, so the SSE
+// payload and the client-side morph stay tiny regardless of grid size.
+function broadcastCells(s: Session, mapId: number, set: Set<number>, changed: number[]) {
+  if (changed.length === 0) return;
+  const html = changed.map((i) => cellHtml(mapId, i, set.has(i))).join("\n");
+  broadcast(s.id, patchElements(html));
 }
 
 function playerDocHtml(s: Session) {
