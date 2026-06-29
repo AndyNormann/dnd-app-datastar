@@ -73,12 +73,6 @@ const SharedBadge: FC<{ shared: number }> = ({ shared }) =>
     <span class="rounded bg-slate-700 px-2 py-0.5 text-xs text-slate-300">DM only</span>
   );
 
-const NOTE_TOOLBAR = [
-  { cmd: "bold", label: "B" },
-  { cmd: "ul", label: "• List" },
-  { cmd: "p", label: "Text" },
-];
-
 export const DmDashboard: FC<{
   origin: string;
   session: Session;
@@ -100,13 +94,6 @@ export const DmDashboard: FC<{
           (<code>##</code> for H2, etc.). Click a heading's <code>#</code> to collapse it;
           tick its checkbox to share it (and everything under it) with players.
         </p>
-        <div class="note-toolbar">
-          {NOTE_TOOLBAR.map((b) => (
-            <button type="button" class="note-tool" data-cmd={b.cmd}>
-              {b.label}
-            </button>
-          ))}
-        </div>
         <div
           id="doc"
           class="note-doc note-editor"

@@ -51,15 +51,7 @@
   line-height: 1.5;
 }
 .note-editor {
-  border: 1px solid rgb(30 41 59);
-  border-radius: 0.375rem;
-  background: rgb(15 23 42 / 0.4);
-  padding: 0.75rem 1rem;
-  min-height: 12rem;
   outline: none;
-}
-.note-editor:focus-within {
-  border-color: rgb(14 165 233);
 }
 .note-doc h1 { font-size: 1.6rem; font-weight: 700; margin: 0.6rem 0 0.3rem; }
 .note-doc h2 { font-size: 1.3rem; font-weight: 700; margin: 0.55rem 0 0.3rem; }
@@ -107,19 +99,3 @@
   cursor: pointer;
 }
 .note-share input { cursor: pointer; }
-
-/* Notes formatting toolbar. */
-.note-toolbar {
-  display: flex;
-  gap: 0.25rem;
-  margin-bottom: 0.4rem;
-}
-.note-tool {
-  border: 1px solid rgb(51 65 85);
-  background: rgb(30 41 59);
-  color: rgb(203 213 225);
-  border-radius: 0.25rem;
-  padding: 0.15rem 0.5rem;
-  font-size: 0.8rem;
-}
-.note-tool:hover { background: rgb(51 65 85); }
