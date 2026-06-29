@@ -21,7 +21,7 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS campaign_docs (
     session_id  INTEGER PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
-    body_md     TEXT NOT NULL DEFAULT '',
+    body_html   TEXT NOT NULL DEFAULT '',
     shared_keys TEXT NOT NULL DEFAULT '',
     updated_at  INTEGER NOT NULL
   );
@@ -40,6 +40,14 @@ db.exec(`
   );
 `);
 
+// Migrate older campaign_docs rows (which stored markdown in body_md) to the
+// HTML-backed column. Adding an existing column throws; ignore that.
+try {
+  db.exec(`ALTER TABLE campaign_docs ADD COLUMN body_html TEXT NOT NULL DEFAULT ''`);
+} catch {
+  /* column already exists */
+}
+
 export type Session = {
   id: number;
   dm_token: string;
@@ -50,7 +58,7 @@ export type Session = {
 
 export type CampaignDoc = {
   session_id: number;
-  body_md: string;
+  body_html: string;
   shared_keys: string; // newline-separated shared heading keys
   updated_at: number;
 };
@@ -108,10 +116,10 @@ export function getDoc(sessionId: number): CampaignDoc {
     .get(sessionId, now())!;
 }
 
-export function setDocBody(sessionId: number, body: string): void {
+export function setDocHtml(sessionId: number, html: string): void {
   getDoc(sessionId); // ensure the row exists
-  db.query(`UPDATE campaign_docs SET body_md = ?, updated_at = ? WHERE session_id = ?`).run(
-    body,
+  db.query(`UPDATE campaign_docs SET body_html = ?, updated_at = ? WHERE session_id = ?`).run(
+    html,
     now(),
     sessionId,
   );

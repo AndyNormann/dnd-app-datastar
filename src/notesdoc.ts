@@ -1,21 +1,19 @@
-import { renderMarkdown } from "./markdown.ts";
+import { parse, HTMLElement, NodeType } from "node-html-parser";
 
-// A heading and the content directly beneath it (up to its first sub-heading),
-// plus nested sub-headings as children.
+// The campaign document is stored as HTML (edited in a contenteditable surface).
+// Headings (<h1>..<h6>) are flat siblings; a heading "owns" the sibling nodes
+// that follow it until the next heading, and nests headings of greater level.
+
+const HEADINGS = new Set(["H1", "H2", "H3", "H4", "H5", "H6"]);
+
 export type Section = {
   level: number;
   title: string;
   key: string;
-  bodyMd: string;
+  headingHtml: string;
+  contentHtml: string;
   children: Section[];
 };
-
-export type ParsedDoc = {
-  preambleMd: string; // content before the first heading
-  sections: Section[]; // top-level heading tree
-};
-
-const HEADING_RE = /^(#{1,6})\s+(.*\S)\s*$/;
 
 export function slugify(title: string): string {
   return (
@@ -29,38 +27,45 @@ export function slugify(title: string): string {
   );
 }
 
-// Parse markdown into a tree of heading sections. Headings inside fenced code
-// blocks are ignored. Keys are slugs disambiguated by document order so the
-// share toggle and both render passes always agree.
-export function parseDoc(md: string): ParsedDoc {
-  const lines = (md ?? "").split("\n");
-  const seen = new Map<string, number>();
+type Flat = {
+  level: number;
+  title: string;
+  key: string;
+  headingHtml: string;
+  content: string[];
+};
 
-  type Flat = { level: number; title: string; key: string; body: string[] };
+function parseFlat(html: string): Flat[] {
+  const root = parse(html ?? "", { lowerCaseTagName: false });
   const flat: Flat[] = [];
-  const preamble: string[] = [];
+  const seen = new Map<string, number>();
   let current: Flat | null = null;
-  let inFence = false;
 
-  for (const line of lines) {
-    if (/^\s*(```|~~~)/.test(line)) inFence = !inFence;
-    const m = inFence ? null : line.match(HEADING_RE);
-    if (m) {
-      const title = m[2];
-      const base = slugify(title);
-      const n = (seen.get(base) ?? 0) + 1;
-      seen.set(base, n);
-      const key = n === 1 ? base : `${base}-${n}`;
-      current = { level: m[1].length, title, key, body: [] };
+  for (const node of root.childNodes) {
+    const el = node.nodeType === NodeType.ELEMENT_NODE ? (node as HTMLElement) : null;
+    if (el && HEADINGS.has(el.tagName)) {
+      const title = el.text.trim();
+      const baseSlug = slugify(title);
+      const n = (seen.get(baseSlug) ?? 0) + 1;
+      seen.set(baseSlug, n);
+      current = {
+        level: Number(el.tagName[1]),
+        title,
+        key: n === 1 ? baseSlug : `${baseSlug}-${n}`,
+        headingHtml: el.toString(),
+        content: [],
+      };
       flat.push(current);
     } else if (current) {
-      current.body.push(line);
-    } else {
-      preamble.push(line);
+      current.content.push(node.toString());
     }
+    // text/nodes before the first heading are preamble — never shared, dropped here.
   }
+  return flat;
+}
 
-  // Build the tree from the flat heading list using a level stack.
+export function parseDoc(html: string): Section[] {
+  const flat = parseFlat(html);
   const roots: Section[] = [];
   const stack: Section[] = [];
   for (const f of flat) {
@@ -68,7 +73,8 @@ export function parseDoc(md: string): ParsedDoc {
       level: f.level,
       title: f.title,
       key: f.key,
-      bodyMd: f.body.join("\n").trim(),
+      headingHtml: f.headingHtml,
+      contentHtml: f.content.join(""),
       children: [],
     };
     while (stack.length && stack[stack.length - 1].level >= node.level) stack.pop();
@@ -76,11 +82,9 @@ export function parseDoc(md: string): ParsedDoc {
     else roots.push(node);
     stack.push(node);
   }
-
-  return { preambleMd: preamble.join("\n").trim(), sections: roots };
+  return roots;
 }
 
-// All heading keys present in the document (used to prune stale shared keys).
 export function allKeys(sections: Section[], out = new Set<string>()): Set<string> {
   for (const s of sections) {
     out.add(s.key);
@@ -89,74 +93,57 @@ export function allKeys(sections: Section[], out = new Set<string>()): Set<strin
   return out;
 }
 
-function esc(s: string): string {
-  return s.replace(/[&<>"']/g, (c) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!,
-  );
-}
-
-// ---------- DM outline (editable, with share toggles) ----------
-export function renderDmOutline(
-  doc: ParsedDoc,
-  shared: Set<string>,
-  base: string,
-): string {
-  const preamble = doc.preambleMd
-    ? `<div class="note-body">${renderMarkdown(doc.preambleMd)}</div>`
-    : "";
-  const body = doc.sections.length
-    ? doc.sections.map((s) => dmSection(s, shared, base, false)).join("")
-    : `<p class="text-slate-500 text-sm">No headings yet — add some <code>#</code> headings and Save.</p>`;
-  return `<div id="dm-outline">${preamble}${body}</div>`;
-}
-
-function dmSection(s: Section, shared: Set<string>, base: string, inherited: boolean): string {
-  const direct = shared.has(s.key);
-  const eff = inherited || direct;
-  const badge = direct
-    ? `<span class="ml-2 rounded bg-emerald-700/70 px-2 py-0.5 text-xs text-emerald-100">Shared</span>`
-    : inherited
-      ? `<span class="ml-2 rounded bg-emerald-900/60 px-2 py-0.5 text-xs text-emerald-300">via parent</span>`
-      : `<span class="ml-2 rounded bg-slate-700 px-2 py-0.5 text-xs text-slate-300">DM only</span>`;
-  const btnLabel = direct ? "Unshare" : "Share";
-  const shareBtn = `<button type="button" class="rounded bg-sky-700 px-2 py-0.5 text-xs hover:bg-sky-600" data-on-click="@post('${base}/notes/share?key=${encodeURIComponent(s.key)}')">${btnLabel}</button>`;
-  const bodyHtml = s.bodyMd ? `<div class="note-body">${renderMarkdown(s.bodyMd)}</div>` : "";
-  const children = s.children.map((c) => dmSection(c, shared, base, eff)).join("");
-  return `
-    <details open class="note-section">
-      <summary class="note-summary"><span class="note-title">${esc(s.title)}</span>${badge}</summary>
-      <div class="note-controls">${shareBtn}</div>
-      ${bodyHtml}
-      ${children}
-    </details>`;
-}
-
-// ---------- Player outline (only shared subtrees) ----------
-export function renderPlayerDoc(doc: ParsedDoc, shared: Set<string>): string {
-  const html = playerNodes(doc.sections, shared, false);
-  const inner = html
-    ? html
-    : `<p class="text-slate-500 text-sm">Your DM hasn't shared any notes yet.</p>`;
-  return `<div id="player-doc" class="note-doc">${inner}</div>`;
+// ---------- Player view: only shared subtrees ----------
+export function renderPlayerDoc(html: string, shared: Set<string>): string {
+  const inner = playerNodes(parseDoc(html), shared, false);
+  const body = inner || `<p class="text-slate-500 text-sm">Your DM hasn't shared any notes yet.</p>`;
+  return `<div id="player-doc" class="note-doc">${body}</div>`;
 }
 
 function playerNodes(nodes: Section[], shared: Set<string>, inherited: boolean): string {
   let out = "";
   for (const s of nodes) {
     const eff = inherited || shared.has(s.key);
-    if (eff) out += playerSectionFull(s);
+    if (eff) out += renderFull(s);
     else out += playerNodes(s.children, shared, false); // skip heading, descend
   }
   return out;
 }
 
-function playerSectionFull(s: Section): string {
-  const bodyHtml = s.bodyMd ? `<div class="note-body">${renderMarkdown(s.bodyMd)}</div>` : "";
-  const children = s.children.map(playerSectionFull).join("");
-  return `
-    <details open class="note-section">
-      <summary class="note-summary"><span class="note-title">${esc(s.title)}</span></summary>
-      ${bodyHtml}
-      ${children}
-    </details>`;
+function renderFull(s: Section): string {
+  return s.headingHtml + s.contentHtml + s.children.map(renderFull).join("");
+}
+
+// ---------- Sanitize editor HTML before persisting ----------
+const ALLOWED_TAGS = new Set([
+  "H1", "H2", "H3", "H4", "H5", "H6",
+  "P", "BR", "UL", "OL", "LI", "STRONG", "EM", "B", "I", "U",
+  "A", "CODE", "PRE", "BLOCKQUOTE",
+]);
+
+export function sanitizeDocHtml(html: string): string {
+  const root = parse(html ?? "", { lowerCaseTagName: false });
+
+  for (const el of root.querySelectorAll("script,style")) el.remove();
+
+  // Walk a snapshot, since we mutate the tree (unwrap) as we go.
+  for (const el of root.querySelectorAll("*")) {
+    const tag = el.tagName?.toUpperCase();
+    if (!tag) continue;
+    if (!ALLOWED_TAGS.has(tag)) {
+      // Unwrap disallowed element: replace it with its inner HTML.
+      el.replaceWith(...el.childNodes);
+      continue;
+    }
+    // Strip every attribute except a safe href on links.
+    for (const name of Object.keys(el.attributes)) {
+      if (tag === "A" && name.toLowerCase() === "href") {
+        const href = el.getAttribute("href") ?? "";
+        if (/^\s*javascript:/i.test(href)) el.removeAttribute("href");
+      } else {
+        el.removeAttribute(name);
+      }
+    }
+  }
+  return root.toString();
 }

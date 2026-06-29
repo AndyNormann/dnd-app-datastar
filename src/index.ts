@@ -9,7 +9,7 @@ import {
   sessionByDm,
   sessionByPlayer,
   getDoc,
-  setDocBody,
+  setDocHtml,
   sharedKeySet,
   setSharedKeys,
   toggleSharedKey,
@@ -23,14 +23,12 @@ import {
   type Session,
 } from "./db.ts";
 import { subscribe, broadcast, patchElements } from "./realtime.ts";
-import { parseDoc, allKeys, renderDmOutline, renderPlayerDoc } from "./notesdoc.ts";
+import { parseDoc, allKeys, renderPlayerDoc, sanitizeDocHtml } from "./notesdoc.ts";
 import {
   HomePage,
   DmDashboard,
-  CampaignEditorPage,
   DmMapPage,
   PlayerDashboard,
-  PlayerNotesPage,
   PlayerMapPage,
   FogOverlay,
   NotFound,
@@ -69,12 +67,15 @@ function dmOr404(c: { req: { param: (k: string) => string } }): Session | null {
 app.get("/dm/:t", (c) => {
   const s = dmOr404(c);
   if (!s) return page(c, NotFound({}));
+  const doc = getDoc(s.id);
   return page(
     c,
     DmDashboard({
       origin: origin(c),
       session: s,
       maps: listMaps(s.id),
+      bodyHtml: doc.body_html,
+      sharedKeys: [...sharedKeySet(doc)],
     }),
   );
 });
@@ -82,28 +83,18 @@ app.get("/dm/:t", (c) => {
 // DM live event stream
 app.get("/dm/:t/events", (c) => sseStream(c, dmOr404(c)));
 
-// Campaign document
-app.get("/dm/:t/notes", (c) => {
-  const s = dmOr404(c);
-  if (!s) return page(c, NotFound({}));
-  const doc = getDoc(s.id);
-  const outline = renderDmOutline(parseDoc(doc.body_md), sharedKeySet(doc), `/dm/${s.dm_token}`);
-  return page(c, CampaignEditorPage({ session: s, bodyMd: doc.body_md, outlineHtml: outline }));
-});
-
+// Campaign document — the inline editor autosaves the contenteditable HTML here.
 app.post("/dm/:t/notes", async (c) => {
   const s = dmOr404(c);
-  if (!s) return page(c, NotFound({}));
-  const body = await c.req.parseBody();
-  const md = String(body.body_md ?? "");
-  setDocBody(s.id, md);
+  if (!s) return c.text("not found", 404);
+  const html = sanitizeDocHtml(await c.req.text());
+  setDocHtml(s.id, html);
   // Drop shared keys for headings that no longer exist.
-  const parsed = parseDoc(md);
-  const exist = allKeys(parsed.sections);
+  const exist = allKeys(parseDoc(html));
   const pruned = new Set([...sharedKeySet(getDoc(s.id))].filter((k) => exist.has(k)));
   setSharedKeys(s.id, pruned);
   broadcastPlayerDoc(s);
-  return c.redirect(`/dm/${s.dm_token}/notes`);
+  return c.body(null, 204);
 });
 
 app.post("/dm/:t/notes/share", (c) => {
@@ -112,13 +103,8 @@ app.post("/dm/:t/notes/share", (c) => {
   const key = c.req.query("key");
   if (!key) return c.text("missing key", 400);
   toggleSharedKey(s.id, key);
-  // Update players live, and return the refreshed DM outline to the DM client.
   broadcastPlayerDoc(s);
-  const doc = getDoc(s.id);
-  const outline = renderDmOutline(parseDoc(doc.body_md), sharedKeySet(doc), `/dm/${s.dm_token}`);
-  return new Response(patchElements(outline), {
-    headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" },
-  });
+  return c.body(null, 204);
 });
 
 // Maps
@@ -213,16 +199,13 @@ function playerOr404(c: { req: { param: (k: string) => string } }): Session | nu
 app.get("/play/:t", (c) => {
   const s = playerOr404(c);
   if (!s) return page(c, NotFound({}));
-  return page(c, PlayerDashboard({ session: s, maps: listMaps(s.id, true) }));
+  return page(
+    c,
+    PlayerDashboard({ session: s, maps: listMaps(s.id, true), docHtml: playerDocHtml(s) }),
+  );
 });
 
 app.get("/play/:t/events", (c) => sseStream(c, playerOr404(c)));
-
-app.get("/play/:t/notes", (c) => {
-  const s = playerOr404(c);
-  if (!s) return page(c, NotFound({}));
-  return page(c, PlayerNotesPage({ session: s, docHtml: playerDocHtml(s) }));
-});
 
 app.get("/play/:t/maps/:id", (c) => {
   const s = playerOr404(c);
@@ -276,7 +259,7 @@ function broadcastFog(s: Session, mapId: number) {
 
 function playerDocHtml(s: Session) {
   const doc = getDoc(s.id);
-  return renderPlayerDoc(parseDoc(doc.body_md), sharedKeySet(doc));
+  return renderPlayerDoc(doc.body_html, sharedKeySet(doc));
 }
 
 function broadcastPlayerDoc(s: Session) {
